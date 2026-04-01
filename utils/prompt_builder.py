@@ -26,6 +26,7 @@ class PromptBuilder:
         for table in selected_tables:
             section = {
                 "table_name": table["table_name"],
+                "header_row": table.get("header_row", 1),
                 "row_count": table["row_count"],
                 "column_count": table["column_count"],
                 "columns": table["columns"],

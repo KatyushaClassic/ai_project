@@ -2,8 +2,9 @@
 
 职责：
 1. 读取多个 Excel 文件到 pandas DataFrame。
-2. 对每张表提供结构化元信息（列名、类型、示例行）。
-3. 为上层模块提供统一的数据访问接口。
+2. 自动识别表头所在行（兼容前置说明行/空行场景）。
+3. 对每张表提供结构化元信息（列名、类型、示例行）。
+4. 为上层模块提供统一的数据访问接口。
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ class DataManager:
     def __init__(self) -> None:
         # key: 表名（文件名），value: DataFrame
         self._tables: dict[str, pd.DataFrame] = {}
+        # key: 表名（文件名），value: 识别到的表头行（1-based）
+        self._header_rows: dict[str, int] = {}
 
     def add_excel_file(self, file_path: str | Path) -> tuple[str, int, int]:
         """读取并登记单个 Excel 文件。
@@ -47,11 +50,19 @@ class DataManager:
         if path.suffix.lower() not in {".xlsx", ".xls"}:
             raise ValueError(f"不支持的文件类型: {path.suffix}")
 
-        # 默认读取第一个 sheet；也可以在后续扩展为多 sheet 模式
-        df = pd.read_excel(path)
+        header_idx = self._detect_header_row(path)
+
+        # 默认读取第一个 sheet；可后续扩展多 sheet
+        df = pd.read_excel(path, header=header_idx)
         df = df.dropna(how="all")  # 清理全空行
+        df = df.loc[:, ~df.columns.isna()]  # 清理空列名
+
+        # 将列名标准化为字符串，防止后续 JSON 序列化异常
+        df.columns = [str(col).strip() for col in df.columns]
+
         table_name = path.name
         self._tables[table_name] = df
+        self._header_rows[table_name] = header_idx + 1  # 转为 1-based，便于展示
         return table_name, len(df), len(df.columns)
 
     def has_data(self) -> bool:
@@ -66,6 +77,12 @@ class DataManager:
         """获取所有表名。"""
         return list(self._tables.keys())
 
+    def get_header_row(self, table_name: str) -> int:
+        """获取识别到的表头行号（1-based）。"""
+        if table_name not in self._tables:
+            raise KeyError(f"表不存在: {table_name}")
+        return self._header_rows.get(table_name, 1)
+
     def get_table_preview(self, table_name: str, rows: int = 20) -> pd.DataFrame:
         """获取单张表预览数据。"""
         if table_name not in self._tables:
@@ -78,10 +95,7 @@ class DataManager:
 
         for table_name, df in self._tables.items():
             columns = list(df.columns)
-            dtypes = {
-                col: self._infer_column_type(df[col])
-                for col in columns
-            }
+            dtypes = {col: self._infer_column_type(df[col]) for col in columns}
 
             sample_df = df.head(sample_rows).copy()
             sample_df = sample_df.where(pd.notnull(sample_df), None)
@@ -90,6 +104,7 @@ class DataManager:
             summary.append(
                 {
                     "table_name": table_name,
+                    "header_row": self._header_rows.get(table_name, 1),
                     "row_count": int(len(df)),
                     "column_count": int(len(columns)),
                     "columns": columns,
@@ -99,6 +114,40 @@ class DataManager:
             )
 
         return summary
+
+    def _detect_header_row(self, path: Path) -> int:
+        """自动识别表头行（返回 0-based 行号）。
+
+        策略：
+        1. 先读取前 15 行（header=None）。
+        2. 计算每行候选分数：非空单元格数 + 字符串占比 + 唯一值比例。
+        3. 取分数最高行作为表头；若全空则回退到第 1 行。
+        """
+        preview = pd.read_excel(path, header=None, nrows=15)
+        if preview.empty:
+            return 0
+
+        best_row_idx = 0
+        best_score = float("-inf")
+
+        for row_idx in range(len(preview)):
+            row = preview.iloc[row_idx]
+            non_null = row.dropna()
+            if non_null.empty:
+                continue
+
+            non_null_count = float(len(non_null))
+            string_count = float(sum(isinstance(v, str) and v.strip() for v in non_null))
+            unique_ratio = float(non_null.nunique(dropna=True)) / non_null_count
+
+            # 表头行通常“非空较多 + 文本较多 + 唯一性较高”
+            score = non_null_count * 2.0 + string_count * 1.5 + unique_ratio
+
+            if score > best_score:
+                best_score = score
+                best_row_idx = row_idx
+
+        return best_row_idx
 
     @staticmethod
     def _infer_column_type(series: pd.Series) -> str:

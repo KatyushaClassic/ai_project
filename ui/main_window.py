@@ -149,7 +149,8 @@ class MainWindow(QMainWindow):
         for file_path in files:
             try:
                 table_name, rows, cols = self.data_manager.add_excel_file(file_path)
-                added_msgs.append(f"{table_name}（{rows}行, {cols}列）")
+                header_row = self.data_manager.get_header_row(table_name)
+                added_msgs.append(f"{table_name}（表头第{header_row}行，{rows}行, {cols}列）")
             except Exception as exc:  # noqa: BLE001 - GUI 兜底提示
                 QMessageBox.warning(self, "文件加载失败", f"{file_path}\n错误：{exc}")
 
