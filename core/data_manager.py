@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib.util
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import pandas as pd
@@ -51,13 +52,19 @@ class DataManager:
         if path.suffix.lower() not in {".xlsx", ".xls"}:
             raise ValueError(f"不支持的文件类型: {path.suffix}")
 
-        header_idx = self._detect_header_row(path)
+        working_path, temp_path = self._prepare_working_excel(path)
+        try:
+            header_idx = self._detect_header_row(working_path)
 
-        # 默认读取第一个 sheet；可后续扩展多 sheet
-        read_engine = self._select_excel_engine(path)
-        if not read_engine:
-            raise RuntimeError(self._build_engine_error_message(path.suffix.lower()))
-        df = pd.read_excel(path, header=header_idx, engine=read_engine)
+            # 默认读取第一个 sheet；可后续扩展多 sheet
+            read_engine = self._select_excel_engine(working_path)
+            if not read_engine:
+                raise RuntimeError(self._build_engine_error_message(working_path.suffix.lower()))
+            df = pd.read_excel(working_path, header=header_idx, engine=read_engine)
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
         df = df.dropna(how="all")  # 清理全空行
         df = df.loc[:, ~df.columns.isna()]  # 清理空列名
 
@@ -197,3 +204,34 @@ class DataManager:
                 "或安装备用方案：pip install xlrd==2.0.1"
             )
         return "当前环境无法读取 .xlsx。请安装：pip install openpyxl 或 python-calamine"
+
+    def _prepare_working_excel(self, path: Path) -> tuple[Path, Path | None]:
+        """将 .xls 转换为临时 .xlsx（不改动源文件），其余格式原样返回。"""
+        if path.suffix.lower() != ".xls":
+            return path, None
+        temp_xlsx = self._convert_xls_to_temp_xlsx(path)
+        return temp_xlsx, temp_xlsx
+
+    def _convert_xls_to_temp_xlsx(self, xls_path: Path) -> Path:
+        """把 .xls 读取后写入临时 .xlsx，仅用于程序内部处理。"""
+        xls_engine = self._select_xls_engine()
+        if not xls_engine:
+            raise RuntimeError(self._build_engine_error_message(".xls"))
+        if not self._module_available("openpyxl"):
+            raise RuntimeError("转换 .xls 需要 openpyxl 写入 .xlsx，请安装：pip install openpyxl")
+
+        raw_df = pd.read_excel(xls_path, header=None, engine=xls_engine)
+        temp_file = tempfile.NamedTemporaryFile(prefix="xls_convert_", suffix=".xlsx", delete=False)
+        temp_path = Path(temp_file.name)
+        temp_file.close()
+        raw_df.to_excel(temp_path, header=False, index=False, engine="openpyxl")
+        return temp_path
+
+    @staticmethod
+    def _select_xls_engine() -> str | None:
+        """仅用于读取 .xls 源文件。"""
+        if DataManager._module_available("python_calamine"):
+            return "calamine"
+        if DataManager._module_available("xlrd"):
+            return "xlrd"
+        return None
