@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
+
 # Ollama API 配置
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5:7b"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_API_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 REQUEST_TIMEOUT = 120
 
 # Prompt 构建配置

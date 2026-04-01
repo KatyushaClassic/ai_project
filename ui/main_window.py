@@ -98,9 +98,11 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout()
         self.send_btn = QPushButton("发送")
         self.add_file_btn = QPushButton("添加 Excel 文件")
+        self.check_ollama_btn = QPushButton("测试 Ollama")
         self.loading_label = QLabel("")
         button_layout.addWidget(self.send_btn)
         button_layout.addWidget(self.add_file_btn)
+        button_layout.addWidget(self.check_ollama_btn)
         button_layout.addWidget(self.loading_label)
         chat_layout.addLayout(button_layout)
 
@@ -123,6 +125,7 @@ class MainWindow(QMainWindow):
 
         self.send_btn.clicked.connect(self._on_send_clicked)
         self.add_file_btn.clicked.connect(self._on_add_file_clicked)
+        self.check_ollama_btn.clicked.connect(self._on_check_ollama_clicked)
         self.table_list.itemSelectionChanged.connect(self._on_table_selected)
 
     def _append_chat(self, role: str, content: str) -> None:
@@ -193,6 +196,10 @@ class MainWindow(QMainWindow):
         if not self.data_manager.has_data():
             QMessageBox.warning(self, "提示", "请先添加至少一个 Excel 文件。")
             return
+        conn = self.ollama_client.check_connection()
+        if not conn.success:
+            QMessageBox.warning(self, "Ollama 未就绪", conn.error)
+            return
 
         self.input_box.clear()
         self._append_chat("user", question)
@@ -208,6 +215,13 @@ class MainWindow(QMainWindow):
         )
 
         self._start_worker(prompt)
+
+    def _on_check_ollama_clicked(self) -> None:
+        conn = self.ollama_client.check_connection()
+        if conn.success:
+            QMessageBox.information(self, "连接成功", f"{conn.content}\n模型：{self.ollama_client.model}")
+            return
+        QMessageBox.warning(self, "连接失败", conn.error)
 
     def _start_worker(self, prompt: str) -> None:
         self._worker_thread = QThread(self)
