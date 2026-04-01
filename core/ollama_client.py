@@ -32,13 +32,21 @@ class OllamaClient:
             resp = requests.get(self.tags_url, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            models = [item.get("name", "") for item in data.get("models", [])]
-            if not any(name.startswith(self.model) for name in models):
+            models = self._extract_model_names(data)
+            matched = self._match_model_name(models, self.model)
+            if not matched:
+                available = "、".join(models) if models else "（无）"
                 return OllamaResponse(
                     success=False,
                     content="",
-                    error=f"已连接 Ollama，但未找到模型：{self.model}。请先执行 `ollama pull {self.model}`。",
+                    error=(
+                        f"已连接 Ollama，但未找到模型：{self.model}。"
+                        f"当前可用模型：{available}。"
+                        f"请设置 OLLAMA_MODEL={models[0] if models else self.model}，"
+                        "或执行 `ollama pull <你的模型名>`。"
+                    ),
                 )
+            self.model = matched
             return OllamaResponse(success=True, content="Ollama 服务连接正常。")
         except requests.RequestException as exc:
             return OllamaResponse(
@@ -51,6 +59,45 @@ class OllamaClient:
             )
         except ValueError as exc:
             return OllamaResponse(success=False, content="", error=f"Ollama 响应解析失败: {exc}")
+
+    @staticmethod
+    def _extract_model_names(tags_response: dict) -> list[str]:
+        """兼容 Ollama 不同版本返回字段：name / model。"""
+        names: list[str] = []
+        for item in tags_response.get("models", []):
+            candidate = item.get("name") or item.get("model") or ""
+            candidate = str(candidate).strip()
+            if candidate:
+                names.append(candidate)
+        return names
+
+    @staticmethod
+    def _match_model_name(models: list[str], target: str) -> str:
+        """模型匹配：精确匹配 > 忽略大小写 > 基础名匹配（冒号前）。"""
+        if not models:
+            return ""
+
+        target_clean = target.strip()
+        target_lower = target_clean.lower()
+
+        # 1) 精确匹配（含大小写）
+        for name in models:
+            if name == target_clean:
+                return name
+
+        # 2) 忽略大小写
+        for name in models:
+            if name.lower() == target_lower:
+                return name
+
+        # 3) 仅按基础模型名匹配（例如 qwen3）
+        target_base = target_lower.split(":", maxsplit=1)[0]
+        for name in models:
+            base = name.lower().split(":", maxsplit=1)[0]
+            if base == target_base:
+                return name
+
+        return ""
 
     def generate(self, prompt: str) -> OllamaResponse:
         payload = {
