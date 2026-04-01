@@ -53,7 +53,8 @@ class DataManager:
         header_idx = self._detect_header_row(path)
 
         # 默认读取第一个 sheet；可后续扩展多 sheet
-        df = pd.read_excel(path, header=header_idx)
+        read_engine = self._select_excel_engine(path)
+        df = pd.read_excel(path, header=header_idx, engine=read_engine)
         df = df.dropna(how="all")  # 清理全空行
         df = df.loc[:, ~df.columns.isna()]  # 清理空列名
 
@@ -123,7 +124,8 @@ class DataManager:
         2. 计算每行候选分数：非空单元格数 + 字符串占比 + 唯一值比例。
         3. 取分数最高行作为表头；若全空则回退到第 1 行。
         """
-        preview = pd.read_excel(path, header=None, nrows=15)
+        read_engine = self._select_excel_engine(path)
+        preview = pd.read_excel(path, header=None, nrows=15, engine=read_engine)
         if preview.empty:
             return 0
 
@@ -159,3 +161,13 @@ class DataManager:
         if is_string_dtype(series):
             return "文本"
         return "其他"
+
+    @staticmethod
+    def _select_excel_engine(path: Path) -> str | None:
+        """根据后缀选择读取引擎，确保 .xls / .xlsx 都可识别。"""
+        suffix = path.suffix.lower()
+        if suffix == ".xls":
+            return "xlrd"
+        if suffix == ".xlsx":
+            return "openpyxl"
+        return None

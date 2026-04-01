@@ -30,6 +30,8 @@ def main() -> None:
         "--hidden-import",
         "openpyxl",
         "--hidden-import",
+        "xlrd",
+        "--hidden-import",
         "PySide6",
         str(main_file),
     ]
