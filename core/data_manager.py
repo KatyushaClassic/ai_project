@@ -151,7 +151,7 @@ class DataManager:
                 continue
 
             non_null_count = float(len(non_null))
-            string_count = float(sum(isinstance(v, str) and v.strip() for v in non_null))
+            string_count = float(sum(1 for v in non_null if isinstance(v, str) and v.strip()))
             unique_ratio = float(non_null.nunique(dropna=True)) / non_null_count
 
             # 表头行通常“非空较多 + 文本较多 + 唯一性较高”
