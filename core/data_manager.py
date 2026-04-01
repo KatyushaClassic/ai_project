@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import importlib
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -50,13 +50,13 @@ class DataManager:
             raise FileNotFoundError(f"文件不存在: {path}")
         if path.suffix.lower() not in {".xlsx", ".xls"}:
             raise ValueError(f"不支持的文件类型: {path.suffix}")
-        if path.suffix.lower() == ".xls":
-            self._ensure_xlrd_available()
 
         header_idx = self._detect_header_row(path)
 
         # 默认读取第一个 sheet；可后续扩展多 sheet
         read_engine = self._select_excel_engine(path)
+        if not read_engine:
+            raise RuntimeError(self._build_engine_error_message(path.suffix.lower()))
         df = pd.read_excel(path, header=header_idx, engine=read_engine)
         df = df.dropna(how="all")  # 清理全空行
         df = df.loc[:, ~df.columns.isna()]  # 清理空列名
@@ -128,6 +128,8 @@ class DataManager:
         3. 取分数最高行作为表头；若全空则回退到第 1 行。
         """
         read_engine = self._select_excel_engine(path)
+        if not read_engine:
+            raise RuntimeError(self._build_engine_error_message(path.suffix.lower()))
         preview = pd.read_excel(path, header=None, nrows=15, engine=read_engine)
         if preview.empty:
             return 0
@@ -167,29 +169,31 @@ class DataManager:
 
     @staticmethod
     def _select_excel_engine(path: Path) -> str | None:
-        """根据后缀选择读取引擎，确保 .xls / .xlsx 都可识别。"""
+        """根据后缀选择读取引擎，优先使用 calamine（同时支持 .xls/.xlsx）。"""
         suffix = path.suffix.lower()
-        if suffix == ".xls":
-            return "xlrd"
-        if suffix == ".xlsx":
+        has_calamine = DataManager._module_available("python_calamine")
+        has_openpyxl = DataManager._module_available("openpyxl")
+        has_xlrd = DataManager._module_available("xlrd")
+
+        # pandas + calamine 同时支持 .xls 和 .xlsx，优先使用，环境最简洁
+        if has_calamine:
+            return "calamine"
+
+        if suffix == ".xlsx" and has_openpyxl:
             return "openpyxl"
+        if suffix == ".xls" and has_xlrd:
+            return "xlrd"
         return None
 
     @staticmethod
-    def _ensure_xlrd_available() -> None:
-        """读取 .xls 前检查 xlrd 可用性与版本。"""
-        try:
-            xlrd = importlib.import_module("xlrd")
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "检测到 .xls 文件，但运行环境缺少 xlrd。"
-                "请安装：pip install xlrd==2.0.1"
-            ) from exc
+    def _module_available(module_name: str) -> bool:
+        return importlib.util.find_spec(module_name) is not None
 
-        version = str(getattr(xlrd, "__version__", "0"))
-        version_numbers = tuple(int(part) for part in version.split(".") if part.isdigit())
-        if version_numbers < (2, 0, 1):
-            raise RuntimeError(
-                f"检测到 xlrd 版本为 {version}，过低。"
-                "请升级：pip install --upgrade xlrd==2.0.1"
+    @staticmethod
+    def _build_engine_error_message(suffix: str) -> str:
+        if suffix == ".xls":
+            return (
+                "当前环境无法读取 .xls。请优先安装：pip install python-calamine；"
+                "或安装备用方案：pip install xlrd==2.0.1"
             )
+        return "当前环境无法读取 .xlsx。请安装：pip install openpyxl 或 python-calamine"
