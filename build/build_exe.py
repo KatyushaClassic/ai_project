@@ -32,6 +32,10 @@ def main() -> None:
         "--hidden-import",
         "xlrd",
         "--hidden-import",
+        "pandas.io.excel._xlrd",
+        "--collect-all",
+        "xlrd",
+        "--hidden-import",
         "PySide6",
         str(main_file),
     ]

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,8 @@ class DataManager:
             raise FileNotFoundError(f"文件不存在: {path}")
         if path.suffix.lower() not in {".xlsx", ".xls"}:
             raise ValueError(f"不支持的文件类型: {path.suffix}")
+        if path.suffix.lower() == ".xls":
+            self._ensure_xlrd_available()
 
         header_idx = self._detect_header_row(path)
 
@@ -171,3 +174,22 @@ class DataManager:
         if suffix == ".xlsx":
             return "openpyxl"
         return None
+
+    @staticmethod
+    def _ensure_xlrd_available() -> None:
+        """读取 .xls 前检查 xlrd 可用性与版本。"""
+        try:
+            xlrd = importlib.import_module("xlrd")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "检测到 .xls 文件，但运行环境缺少 xlrd。"
+                "请安装：pip install xlrd==2.0.1"
+            ) from exc
+
+        version = str(getattr(xlrd, "__version__", "0"))
+        version_numbers = tuple(int(part) for part in version.split(".") if part.isdigit())
+        if version_numbers < (2, 0, 1):
+            raise RuntimeError(
+                f"检测到 xlrd 版本为 {version}，过低。"
+                "请升级：pip install --upgrade xlrd==2.0.1"
+            )
