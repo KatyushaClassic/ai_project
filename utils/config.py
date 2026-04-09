@@ -8,7 +8,9 @@ import os
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_API_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags"
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_PS_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/ps"
+# 不设置默认模型：优先自动选择当前正在运行的模型。
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip()
 REQUEST_TIMEOUT = 120
 
 # Prompt 构建配置
