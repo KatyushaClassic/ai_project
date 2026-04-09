@@ -24,30 +24,39 @@ class OllamaClient:
     def __init__(self, api_url: str | None = None, model: str | None = None) -> None:
         self.api_url = api_url or config.OLLAMA_API_URL
         self.tags_url = config.OLLAMA_TAGS_URL
+        self.ps_url = config.OLLAMA_PS_URL
         self.model = model or config.OLLAMA_MODEL
 
     def check_connection(self) -> OllamaResponse:
-        """检查 Ollama 服务与模型可用性。"""
+        """检查 Ollama 服务并自动选择可用模型。"""
         try:
             resp = requests.get(self.tags_url, timeout=15)
             resp.raise_for_status()
             data = resp.json()
-            models = self._extract_model_names(data)
-            matched = self._match_model_name(models, self.model)
-            if not matched:
-                available = "、".join(models) if models else "（无）"
+            installed_models = self._extract_model_names(data)
+            running_models = self._fetch_running_models()
+
+            selected = self._select_model(
+                installed_models=installed_models,
+                running_models=running_models,
+                preferred_model=self.model,
+            )
+            if not selected:
+                available = "、".join(installed_models) if installed_models else "（无）"
                 return OllamaResponse(
                     success=False,
                     content="",
                     error=(
-                        f"已连接 Ollama，但未找到模型：{self.model}。"
-                        f"当前可用模型：{available}。"
-                        f"请设置 OLLAMA_MODEL={models[0] if models else self.model}，"
-                        "或执行 `ollama pull <你的模型名>`。"
+                        "已连接 Ollama，但没有可用模型。"
+                        f"当前已安装模型：{available}。"
+                        "请先执行 `ollama pull <你的模型名>`，然后重试。"
                     ),
                 )
-            self.model = matched
-            return OllamaResponse(success=True, content="Ollama 服务连接正常。")
+            self.model = selected
+            return OllamaResponse(
+                success=True,
+                content=f"Ollama 服务连接正常，已选择模型：{self.model}。",
+            )
         except requests.RequestException as exc:
             return OllamaResponse(
                 success=False,
@@ -71,9 +80,21 @@ class OllamaClient:
                 names.append(candidate)
         return names
 
+    def _fetch_running_models(self) -> list[str]:
+        """获取当前正在运行的模型列表。接口不可用时返回空列表。"""
+        try:
+            resp = requests.get(self.ps_url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            return self._extract_model_names(data)
+        except (requests.RequestException, ValueError):
+            return []
+
     @staticmethod
     def _match_model_name(models: list[str], target: str) -> str:
         """模型匹配：精确匹配 > 忽略大小写 > 基础名匹配（冒号前）。"""
+        if not target:
+            return ""
         if not models:
             return ""
 
@@ -97,6 +118,23 @@ class OllamaClient:
             if base == target_base:
                 return name
 
+        return ""
+
+    def _select_model(
+        self,
+        installed_models: list[str],
+        running_models: list[str],
+        preferred_model: str,
+    ) -> str:
+        """选择模型策略：用户指定 > 运行中模型 > 已安装模型。"""
+        preferred_match = self._match_model_name(installed_models, preferred_model)
+        if preferred_match:
+            return preferred_match
+
+        if running_models:
+            return running_models[0]
+        if installed_models:
+            return installed_models[0]
         return ""
 
     def generate(self, prompt: str) -> OllamaResponse:
